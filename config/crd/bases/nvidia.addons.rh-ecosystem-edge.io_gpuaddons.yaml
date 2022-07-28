@@ -49,6 +49,18 @@ spec:
                 default: true
                 description: If enabled, addon will deploy the GPU console plugin.
                 type: boolean
+              driver_version:
+                description: Used to Pin a specific driver version
+                enum:
+                - 450.191.01
+                - 450.172.01
+                - 470.103.01
+                - 470.129.06
+                - 470.82.01
+                - 510.73.08
+                - 510.47.03
+                - 515.48.07
+                type: string
               nvaie_pullsecret:
                 description: Optional NVAIE pullsecret
                 type: string

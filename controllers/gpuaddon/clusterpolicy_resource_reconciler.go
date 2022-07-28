@@ -124,6 +124,10 @@ func (r *ClusterPolicyResourceReconciler) setDesiredClusterPolicy(
 		Enabled: &enabled,
 	}
 
+	if gpuAddon.Spec.DriverVersion != "" {
+		cp.Spec.Driver.Version = gpuAddon.Spec.DriverVersion
+	}
+
 	cp.Spec.Driver.UseOpenShiftDriverToolkit = &enabled
 
 	cp.Spec.Driver.GPUDirectRDMA = &gpuv1.GPUDirectRDMASpec{

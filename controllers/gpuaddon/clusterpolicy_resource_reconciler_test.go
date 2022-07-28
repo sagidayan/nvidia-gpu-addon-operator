@@ -65,6 +65,7 @@ var _ = Describe("ClusterPolicy Resource Reconcile", Ordered, func() {
 				Name: common.GlobalConfig.ClusterPolicyName,
 			}, &cp)
 			Expect(err).ShouldNot(HaveOccurred())
+			Expect(cp.Spec.Driver.Version).To(BeEmpty())
 		})
 	})
 
@@ -101,6 +102,63 @@ var _ = Describe("ClusterPolicy Resource Reconcile", Ordered, func() {
 			deleted, err = rrec.Delete(context.TODO(), c)
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(deleted).To(BeTrue())
+		})
+	})
+
+	Context("Driver version pinning", func() {
+		common.ProcessConfig()
+		pinnedVersion := "470.82.01"
+		pinnedVersionUnsupported := "NotAVersion"
+		rrec := &ClusterPolicyResourceReconciler{}
+		gpuAddon := addonv1alpha1.GPUAddon{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test",
+			},
+			Spec: addonv1alpha1.GPUAddonSpec{
+				DriverVersion: pinnedVersion,
+			},
+		}
+		scheme := scheme.Scheme
+		Expect(gpuv1.AddToScheme(scheme)).ShouldNot(HaveOccurred())
+
+		var cp gpuv1.ClusterPolicy
+
+		It("should create the ClusterPolicy with specified driver version", func() {
+			c := fake.
+				NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects().
+				Build()
+
+			cond, err := rrec.Reconcile(context.TODO(), c, &gpuAddon)
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(cond).To(HaveLen(1))
+			Expect(cond[0].Type).To(Equal(ClusterPolicyDeployedCondition))
+			Expect(cond[0].Status).To(Equal(metav1.ConditionTrue))
+
+			err = c.Get(context.TODO(), types.NamespacedName{
+				Name: common.GlobalConfig.ClusterPolicyName,
+			}, &cp)
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(cp.Spec.Driver.Version).ToNot(BeEmpty())
+			Expect(cp.Spec.Driver.Version).To(Equal(pinnedVersion))
+		})
+
+		It("should throw error for unsupported driver version", func() {
+			c := fake.
+				NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects().
+				Build()
+
+			gpuAddon.Spec.DriverVersion = pinnedVersionUnsupported
+			err := c.Create(context.TODO(), &gpuAddon)
+			Expect(err).Should(HaveOccurred())
+
+			err = c.Get(context.TODO(), types.NamespacedName{
+				Name: common.GlobalConfig.ClusterPolicyName,
+			}, &cp)
+			Expect(k8serrors.IsNotFound(err)).Should(BeTrue())
 		})
 	})
 })
