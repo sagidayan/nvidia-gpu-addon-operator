@@ -49,6 +49,11 @@ spec:
                 default: true
                 description: If enabled, addon will deploy the GPU console plugin.
                 type: boolean
+              driver_version:
+                description: "DriverVersion specifies the GPU driver to be pinned.
+                  \n It should be a string in the form of: - a semantic version, e.g.
+                  515.48.07 or - a container image digest, e.g. sha256:<digest>"
+                type: string
               nvaie_pullsecret:
                 description: Optional NVAIE pullsecret
                 type: string

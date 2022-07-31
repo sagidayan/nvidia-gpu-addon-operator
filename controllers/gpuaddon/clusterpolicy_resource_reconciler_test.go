@@ -20,6 +20,7 @@ import (
 	"context"
 
 	gpuv1 "github.com/NVIDIA/gpu-operator/api/v1"
+	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/operator-framework/operator-lifecycle-manager/pkg/api/client/clientset/versioned/scheme"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,32 +41,83 @@ var _ = Describe("ClusterPolicy Resource Reconcile", Ordered, func() {
 		rrec := &ClusterPolicyResourceReconciler{}
 		gpuAddon := addonv1alpha1.GPUAddon{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: "test",
+				Name:      "test",
+				Namespace: "test",
+			},
+		}
+		gpuOperatorCsv := &operatorsv1alpha1.ClusterServiceVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "gpu-operator-certified.v1.10.1",
+				Namespace: gpuAddon.Namespace,
+			},
+			Spec: operatorsv1alpha1.ClusterServiceVersionSpec{
+				RelatedImages: []operatorsv1alpha1.RelatedImage{
+					{Name: "driver-image", Image: "nvcr.io/nvidia/driver@sha256somedigest"},
+				},
 			},
 		}
 		scheme := scheme.Scheme
 		Expect(gpuv1.AddToScheme(scheme)).ShouldNot(HaveOccurred())
+		Expect(operatorsv1alpha1.AddToScheme(scheme)).ShouldNot(HaveOccurred())
 
 		var cp gpuv1.ClusterPolicy
 
-		It("should create the ClusterPolicy", func() {
-			c := fake.
-				NewClientBuilder().
-				WithScheme(scheme).
-				WithRuntimeObjects().
-				Build()
+		Context("with a GPUAddon.DriverVersion defined", func() {
+			It("should create the ClusterPolicy with the GPUAddon.DriverVersion as the driver version", func() {
+				gpuAddon.Spec = addonv1alpha1.GPUAddonSpec{
+					DriverVersion: "515.48.07",
+				}
 
-			cond, err := rrec.Reconcile(context.TODO(), c, &gpuAddon)
-			Expect(err).ShouldNot(HaveOccurred())
-			Expect(cond).To(HaveLen(1))
-			Expect(cond[0].Type).To(Equal(ClusterPolicyDeployedCondition))
-			Expect(cond[0].Status).To(Equal(metav1.ConditionTrue))
+				c := fake.
+					NewClientBuilder().
+					WithScheme(scheme).
+					WithRuntimeObjects(gpuOperatorCsv).
+					Build()
 
-			err = c.Get(context.TODO(), types.NamespacedName{
-				Name: common.GlobalConfig.ClusterPolicyName,
-			}, &cp)
-			Expect(err).ShouldNot(HaveOccurred())
+				cond, err := rrec.Reconcile(context.TODO(), c, &gpuAddon)
+				Expect(err).ShouldNot(HaveOccurred())
+				Expect(cond).To(HaveLen(1))
+				Expect(cond[0].Type).To(Equal(ClusterPolicyDeployedCondition))
+				Expect(cond[0].Status).To(Equal(metav1.ConditionTrue))
+
+				err = c.Get(context.TODO(), types.NamespacedName{
+					Name: common.GlobalConfig.ClusterPolicyName,
+				}, &cp)
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(cp.Spec.Driver.Repository).To(Equal("nvcr.io/nvidia"))
+				Expect(cp.Spec.Driver.Image).To(Equal("driver"))
+				Expect(cp.Spec.Driver.Version).To(Equal("515.48.07"))
+			})
 		})
+
+		Context("without a GPUAddon.DriverVersion defined", func() {
+			It("should create the ClusterPolicy with the GPU operator CSV related driver-image", func() {
+				gpuAddon.Spec = addonv1alpha1.GPUAddonSpec{
+					DriverVersion: "",
+				}
+
+				c := fake.
+					NewClientBuilder().
+					WithScheme(scheme).
+					WithRuntimeObjects(gpuOperatorCsv).
+					Build()
+
+				cond, err := rrec.Reconcile(context.TODO(), c, &gpuAddon)
+				Expect(err).ShouldNot(HaveOccurred())
+				Expect(cond).To(HaveLen(1))
+				Expect(cond[0].Type).To(Equal(ClusterPolicyDeployedCondition))
+				Expect(cond[0].Status).To(Equal(metav1.ConditionTrue))
+
+				err = c.Get(context.TODO(), types.NamespacedName{
+					Name: common.GlobalConfig.ClusterPolicyName,
+				}, &cp)
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(cp.Spec.Driver.Image).To(Equal("nvcr.io/nvidia/driver@sha256somedigest"))
+			})
+		})
+
 	})
 
 	Context("Delete", func() {

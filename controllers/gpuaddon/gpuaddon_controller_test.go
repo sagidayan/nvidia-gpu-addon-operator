@@ -227,15 +227,7 @@ func prepareClusterForGPUAddonDeletionTest() (*addonv1alpha1.GPUAddon, *GPUAddon
 		},
 	}
 
-	// GPU Operator CSV
-	csv := &operatorsv1alpha1.ClusterServiceVersion{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "gpu-operator-certified.v1.10.1",
-			Namespace: gpuAddon.Namespace,
-		},
-	}
-
-	r := newTestGPUAddonReconciler(gpuAddon, gpuaddoncsv, nfd, subscription, csv, clusterPolicy)
+	r := newTestGPUAddonReconciler(gpuAddon, gpuaddoncsv, nfd, subscription, clusterPolicy)
 
 	return gpuAddon, r
 }
@@ -267,6 +259,20 @@ func newTestGPUAddonReconciler(objs ...runtime.Object) *GPUAddonReconciler {
 	}
 
 	objs = append(objs, clusterVersion)
+
+	gpuOperatorCsv := &operatorsv1alpha1.ClusterServiceVersion{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "gpu-operator-certified.v1.10.1",
+			Namespace: common.GlobalConfig.AddonNamespace,
+		},
+		Spec: operatorsv1alpha1.ClusterServiceVersionSpec{
+			RelatedImages: []operatorsv1alpha1.RelatedImage{
+				{Name: "driver-image", Image: "nvcr.io/nvidia/driver@sha256somedigest"},
+			},
+		},
+	}
+
+	objs = append(objs, gpuOperatorCsv)
 
 	c := fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(objs...).Build()
 

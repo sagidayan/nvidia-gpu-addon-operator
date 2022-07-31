@@ -31,6 +31,13 @@ type GPUAddonSpec struct {
 	ConsolePluginEnabled bool `json:"console_plugin_enabled,omitempty"`
 	// Optional NVAIE pullsecret
 	NVAIEPullSecret string `json:"nvaie_pullsecret,omitempty"`
+	//+kubebuilder:validation:Optional
+	// DriverVersion specifies the GPU driver to be pinned.
+	//
+	// It should be a string in the form of:
+	// - a semantic version, e.g. 515.48.07 or
+	// - a container image digest, e.g. sha256:<digest>
+	DriverVersion string `json:"driver_version,omitempty"`
 }
 
 // GPUAddonStatus defines the observed state of GPUAddon
