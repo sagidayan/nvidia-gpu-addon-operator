@@ -45,17 +45,6 @@ var _ = Describe("ClusterPolicy Resource Reconcile", Ordered, func() {
 				Namespace: "test",
 			},
 		}
-		gpuOperatorCsv := &operatorsv1alpha1.ClusterServiceVersion{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "gpu-operator-certified.v1.10.1",
-				Namespace: gpuAddon.Namespace,
-			},
-			Spec: operatorsv1alpha1.ClusterServiceVersionSpec{
-				RelatedImages: []operatorsv1alpha1.RelatedImage{
-					{Name: "driver-image", Image: "nvcr.io/nvidia/driver@sha256somedigest"},
-				},
-			},
-		}
 		scheme := scheme.Scheme
 		Expect(gpuv1.AddToScheme(scheme)).ShouldNot(HaveOccurred())
 		Expect(operatorsv1alpha1.AddToScheme(scheme)).ShouldNot(HaveOccurred())
@@ -71,7 +60,7 @@ var _ = Describe("ClusterPolicy Resource Reconcile", Ordered, func() {
 				c := fake.
 					NewClientBuilder().
 					WithScheme(scheme).
-					WithRuntimeObjects(gpuOperatorCsv).
+					WithRuntimeObjects().
 					Build()
 
 				cond, err := rrec.Reconcile(context.TODO(), c, &gpuAddon)
@@ -92,7 +81,7 @@ var _ = Describe("ClusterPolicy Resource Reconcile", Ordered, func() {
 		})
 
 		Context("without a GPUAddon.DriverVersion defined", func() {
-			It("should create the ClusterPolicy with the GPU operator CSV related driver-image", func() {
+			It("should create the ClusterPolicy without specifying a driver version", func() {
 				gpuAddon.Spec = addonv1alpha1.GPUAddonSpec{
 					DriverVersion: "",
 				}
@@ -100,7 +89,7 @@ var _ = Describe("ClusterPolicy Resource Reconcile", Ordered, func() {
 				c := fake.
 					NewClientBuilder().
 					WithScheme(scheme).
-					WithRuntimeObjects(gpuOperatorCsv).
+					WithRuntimeObjects().
 					Build()
 
 				cond, err := rrec.Reconcile(context.TODO(), c, &gpuAddon)
@@ -114,7 +103,9 @@ var _ = Describe("ClusterPolicy Resource Reconcile", Ordered, func() {
 				}, &cp)
 				Expect(err).ToNot(HaveOccurred())
 
-				Expect(cp.Spec.Driver.Image).To(Equal("nvcr.io/nvidia/driver@sha256somedigest"))
+				Expect(cp.Spec.Driver.Repository).To(BeEmpty())
+				Expect(cp.Spec.Driver.Version).To(BeEmpty())
+				Expect(cp.Spec.Driver.Image).To(BeEmpty())
 			})
 		})
 

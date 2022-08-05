@@ -128,21 +128,6 @@ func (r *ClusterPolicyResourceReconciler) setDesiredClusterPolicy(
 		cp.Spec.Driver.Repository = "nvcr.io/nvidia"
 		cp.Spec.Driver.Image = "driver"
 		cp.Spec.Driver.Version = gpuAddon.Spec.DriverVersion
-
-	} else {
-		if cp.Spec.Driver.Image == "" {
-			driverImage, err := r.getDriverRelatedImageFromCSV(c, gpuAddon.Namespace, "gpu-operator-certified")
-			if err != nil {
-				return err
-			}
-
-			// the GPU operator expects either the full image path, i.e. the image URL under
-			// ClusterPolicy.Spec.Driver.Image and the ClusterPolicy.Spec.Driver.{Repository,Version}
-			// empty or all of them when one of the latter is non-empty.
-			cp.Spec.Driver.Repository = ""
-			cp.Spec.Driver.Version = ""
-			cp.Spec.Driver.Image = driverImage
-		}
 	}
 
 	cp.Spec.Driver.UseOpenShiftDriverToolkit = &enabled
@@ -179,31 +164,6 @@ func (r *ClusterPolicyResourceReconciler) Delete(ctx context.Context, c client.C
 	}
 
 	return false, nil
-}
-
-func (r *ClusterPolicyResourceReconciler) getDriverRelatedImageFromCSV(
-	c client.Client,
-	namespace string,
-	csvPrefix string) (string, error) {
-
-	csv, err := common.GetCsvWithPrefix(c, namespace, "gpu-operator-certified")
-	if err != nil {
-		return "", err
-	}
-
-	image := ""
-	for _, v := range csv.Spec.RelatedImages {
-		if v.Name == "driver-image" {
-			image = v.Image
-			break
-		}
-	}
-
-	if image == "" {
-		return "", errors.New("driver-image could not be found in gpu-operator-certified CSV relatedImages")
-	}
-
-	return image, nil
 }
 
 func (r *ClusterPolicyResourceReconciler) getDeployedConditionFetchFailed() metav1.Condition {

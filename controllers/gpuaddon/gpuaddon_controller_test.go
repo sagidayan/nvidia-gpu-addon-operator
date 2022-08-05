@@ -265,11 +265,6 @@ func newTestGPUAddonReconciler(objs ...runtime.Object) *GPUAddonReconciler {
 			Name:      "gpu-operator-certified.v1.10.1",
 			Namespace: common.GlobalConfig.AddonNamespace,
 		},
-		Spec: operatorsv1alpha1.ClusterServiceVersionSpec{
-			RelatedImages: []operatorsv1alpha1.RelatedImage{
-				{Name: "driver-image", Image: "nvcr.io/nvidia/driver@sha256somedigest"},
-			},
-		},
 	}
 
 	objs = append(objs, gpuOperatorCsv)
