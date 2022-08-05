@@ -391,7 +391,7 @@ func (r *ConsolePluginResourceReconciler) setDesiredConsolePluginDeployment(
 	}
 
 	consolePluginContainer.SecurityContext = &corev1.SecurityContext{
-		AllowPrivilegeEscalation: pointer.Bool(true),
+		AllowPrivilegeEscalation: pointer.Bool(false),
 		RunAsNonRoot:             pointer.Bool(true),
 	}
 	consolePluginContainer.VolumeMounts = []corev1.VolumeMount{
