@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+
+set -o nounset
+set -x
+
+BASE_COLLECTION_PATH="${BASE_COLLECTION_PATH:-/must-gather}"
+mkdir -p $BASE_COLLECTION_PATH
+
+if [[ "$0" == "/usr/bin/gather" ]]; then
+    echo "NVIDIA GPU addon" > $BASE_COLLECTION_PATH/version
+    echo "$VERSION" >> $BASE_COLLECTION_PATH/version
+fi
+
+/usr/bin/gather_addon_resources
+
+sync

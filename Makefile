@@ -55,6 +55,7 @@ endif
 
 # Image URL to use all building/pushing image targets
 IMG ?= quay.io/edge-infrastructure/nvidia-gpu-addon-operator:1.0.0
+MG_IMG ?= $(shell echo $(IMG) | awk -F':' '{ printf "%s-must-gather:%s", $$1, $$2 }')
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.23
 
@@ -98,7 +99,7 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: dependencies
-dependencies: 
+dependencies:
 	cp ./config/metadata/*yaml ./bundle/metadata/
 
 .PHONY: generate
@@ -114,7 +115,7 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 .PHONY: lint
-lint: 
+lint:
 	golangci-lint run -v
 
 .PHONY: test
@@ -138,6 +139,14 @@ docker-build: test ## Build docker image with the manager.
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
+
+.PHONY: docker-build-mg
+docker-build-mg: ## Build must-gather container image
+	docker build -t ${MG_IMG} --build-arg VERSION=$(VERSION) -f must-gather.Dockerfile .
+
+.PHONY: docker-push-mg
+docker-push-mg: ## Push must-gather container image
+	docker push ${MG_IMG}
 
 ##@ Deployment
 
@@ -181,7 +190,7 @@ envtest: ## Download envtest-setup locally if necessary.
 .PHONY: bundle
 bundle: manifests kustomize ## Generate bundle manifests and metadata, then validate generated files.
 	operator-sdk generate kustomize manifests -q
-	cd config/manager && $(KUSTOMIZE) edit set image controller=$(IMG)
+	cd config/manager && $(KUSTOMIZE) edit set image controller=$(IMG) && $(KUSTOMIZE) edit set image must-gather-image=$(MG_IMG)
 	$(KUSTOMIZE) build config/manifests | operator-sdk generate bundle --extra-service-accounts prometheus-k8s $(BUNDLE_GEN_FLAGS)
 	cp ./config/metadata/*.yaml ./bundle/metadata/
 	operator-sdk bundle validate ./bundle

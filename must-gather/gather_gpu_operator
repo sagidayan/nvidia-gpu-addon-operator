@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+
+set -o nounset
+set -x
+
+BASE_COLLECTION_PATH="${BASE_COLLECTION_PATH:-/must-gather}"
+
+mkdir -p "$BASE_COLLECTION_PATH"
+
+OPERATOR_IMAGE=$(oc get pods -A -lapp=gpu-operator -o=jsonpath='{.items[0].spec.containers[0].image}' 2> /dev/null)
+oc adm must-gather --image="$OPERATOR_IMAGE" --dest-dir="$BASE_COLLECTION_PATH" &> /dev/null
+
+sync

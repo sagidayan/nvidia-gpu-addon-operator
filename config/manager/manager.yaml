@@ -35,6 +35,8 @@ spec:
         env:
         - name: RELATED_IMAGE_CONSOLE_PLUGIN
           value: quay.io/edge-infrastructure/console-plugin-nvidia-gpu:release-0.0.1
+        - name: RELATED_IMAGE_MUST_GATHER
+          value: must-gather-image
         image: controller:latest
         imagePullPolicy: Always
         name: manager

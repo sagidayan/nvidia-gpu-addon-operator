@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+
+set -o nounset
+set -x
+
+BASE_COLLECTION_PATH="${BASE_COLLECTION_PATH:-/must-gather}"
+mkdir -p $BASE_COLLECTION_PATH
+
+DEFAULT_NS=redhat-nvidia-gpu-addon
+ADDON_NAMESPACE=${ADDON_NAMESPACE:-$(oc get subscriptions.operators.coreos.com --field-selector metadata.name=nvidia-gpu-addon-operator -A -ojsonpath={.items[].metadata.namespace} --ignore-not-found)}
+if [[ -z "$ADDON_NAMESPACE" ]]; then
+    echo "Warning: Addon namespace cannot be determined as the subscription was not found, will collect from the default namespace '$DEFAULT_NS'" >&2
+    ADDON_NAMESPACE=$DEFAULT_NS
+fi
+
+if ! oc get ns $ADDON_NAMESPACE > /dev/null; then
+  exit 1
+fi
+
+oc adm inspect --dest-dir $BASE_COLLECTION_PATH --rotated-pod-logs "ns/$ADDON_NAMESPACE"
+
+custom_resource_types=(catalogsource subscription operator gpuaddon nodefeaturediscovery consoleplugin prometheus alertmananger)
+filtered_custom_resource_types=()
+for ct in "${custom_resource_types[@]}"
+do
+  oc get "$ct" -n $ADDON_NAMESPACE > /dev/null 2>&1
+  if [[ "$?" -eq 0 ]]; then
+    filtered_custom_resource_types+=("$ct")
+  fi
+done
+
+custom_resources_text=$(IFS=, ; echo "${filtered_custom_resource_types[*]}")
+oc adm inspect --dest-dir $BASE_COLLECTION_PATH --rotated-pod-logs -n $ADDON_NAMESPACE "${custom_resources_text}"
+
+sync

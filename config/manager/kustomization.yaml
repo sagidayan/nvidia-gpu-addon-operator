@@ -1,6 +1,9 @@
 resources:
 - manager.yaml
 
+configurations:
+- kustomizeconfig.yaml
+
 generatorOptions:
   disableNameSuffixHash: true
 
@@ -13,4 +16,7 @@ kind: Kustomization
 images:
 - name: controller
   newName: quay.io/edge-infrastructure/nvidia-gpu-addon-operator
+  newTag: 1.0.0
+- name: must-gather-image
+  newName: quay.io/edge-infrastructure/nvidia-gpu-addon-operator-must-gather
   newTag: 1.0.0
