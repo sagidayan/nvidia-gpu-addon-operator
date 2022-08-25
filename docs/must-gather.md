@@ -3,7 +3,7 @@ Collecting debugging and troubleshooting info
 
 When having troubles with the GPU add-on, you may be asked by the support team to collect must-gather data for the add-on. The collection relies on the standard [OpenShift mechanism](https://docs.openshift.com/container-platform/4.10/support/gathering-cluster-data.html) for gathering troubleshooting data.
 
->**WARNING**: The collected data may include sensitive information such as secrets related to the add-on. Be careful when handing it over to other people.
+NOTE: The collected data may include K8s secrets. However, the values will be automatically replaced with their length in bytes, Base64-encoded, to prevent an accidental leak of sensitive information.
 
 # GPU Add-on
 
