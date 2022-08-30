@@ -16,7 +16,7 @@ kind: Kustomization
 images:
 - name: controller
   newName: quay.io/edge-infrastructure/nvidia-gpu-addon-operator
-  newTag: 1.1
+  newTag: latest
 - name: must-gather-image
   newName: quay.io/edge-infrastructure/nvidia-gpu-addon-operator-must-gather
-  newTag: 1.1
+  newTag: latest
