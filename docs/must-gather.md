@@ -10,19 +10,19 @@ NOTE: The collected data may include K8s secrets. However, the values will be au
 First, locate the GPU add-on `ClusterServiceVersion` (CSV) and note its output:
 
 ```sh
-oc get csv -n <gpu-addon-namespace> -o custom-columns=NAME:.metadata.name --no-headers | grep nvidia-gpu-addon
+oc get csv -n <gpu-addon-namespace> -o name | grep nvidia-gpu-addon
 ```
 
 The default GPU add-on namespace is `redhat-nvidia-gpu-addon`, so in most cases the command will look like
 
 ```sh
-oc get csv -n redhat-nvidia-gpu-addon -o custom-columns=NAME:.metadata.name --no-headers | grep nvidia-gpu-addon
+oc get csv -n redhat-nvidia-gpu-addon -o name | grep nvidia-gpu-addon
 ```
 
 Next, find out the right must-gather container image by running:
 
 ```sh
-oc get csv <gpu-addon-csv> -n <gpu-addon-namespace> -o jsonpath='{.spec.relatedImages[?(@.name == "must-gather")].image}'
+oc get <gpu-addon-csv> -n <gpu-addon-namespace> -o jsonpath='{.spec.relatedImages[?(@.name == "must-gather")].image}'
 ```
 
 Finally, gather the troubleshooting info:
@@ -35,8 +35,8 @@ Let's put it all together:
 
 ```sh
 namespace=redhat-nvidia-gpu-addon
-csv=$(oc get csv -n $namespace -o custom-columns=NAME:.metadata.name --no-headers | grep nvidia-gpu-addon)
-must_gather_image=$(oc get csv $csv -n $namespace -o jsonpath='{.spec.relatedImages[?(@.name == "must-gather")].image}')
+csv=$(oc get csv -n $namespace -o name | grep nvidia-gpu-addon)
+must_gather_image=$(oc get $csv -n $namespace -o jsonpath='{.spec.relatedImages[?(@.name == "must-gather")].image}')
 oc adm must-gather --image="$must_gather_image" --dest-dir=gpu-addon-gather
 ```
 
