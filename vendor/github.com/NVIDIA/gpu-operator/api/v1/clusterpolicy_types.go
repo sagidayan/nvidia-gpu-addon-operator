@@ -23,6 +23,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	promv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -62,6 +63,16 @@ type ClusterPolicySpec struct {
 	Validator ValidatorSpec `json:"validator,omitempty"`
 	// GPUDirectStorage defines the spec for GDS components(Experimental)
 	GPUDirectStorage *GPUDirectStorageSpec `json:"gds,omitempty"`
+	// SandboxWorkloads defines the spec for handling sandbox workloads (i.e. Virtual Machines)
+	SandboxWorkloads SandboxWorkloadsSpec `json:"sandboxWorkloads,omitempty"`
+	// VFIOManager for configuration to deploy VFIO-PCI Manager
+	VFIOManager VFIOManagerSpec `json:"vfioManager,omitempty"`
+	// SandboxDevicePlugin component spec
+	SandboxDevicePlugin SandboxDevicePluginSpec `json:"sandboxDevicePlugin,omitempty"`
+	// VGPUManager component spec
+	VGPUManager VGPUManagerSpec `json:"vgpuManager,omitempty"`
+	// VGPUDeviceManager spec
+	VGPUDeviceManager VGPUDeviceManagerSpec `json:"vgpuDeviceManager,omitempty"`
 }
 
 // Runtime defines container runtime type
@@ -77,8 +88,6 @@ const (
 	CRIO Runtime = "crio"
 	// Containerd runtime
 	Containerd Runtime = "containerd"
-	// DefaultNvidiaDriverRoot indicates default root directory of driver installation with gpu-operator
-	DefaultNvidiaDriverRoot = "/run/nvidia/driver"
 )
 
 func (r Runtime) String() string {
@@ -102,6 +111,24 @@ type OperatorSpec struct {
 	// +kubebuilder:default=nvidia
 	RuntimeClass  string            `json:"runtimeClass,omitempty"`
 	InitContainer InitContainerSpec `json:"initContainer,omitempty"`
+
+	// UseOpenShiftDriverToolkit indicates if DriverToolkit image should be used on OpenShift to build and install driver modules
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="On OpenShift, enable DriverToolkit image to build and install driver modules"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:booleanSwitch"
+	UseOpenShiftDriverToolkit *bool `json:"use_ocp_driver_toolkit,omitempty"`
+}
+
+// SandboxWorkloadsSpec describes configuration for handling sandbox workloads (i.e. Virtual Machines)
+type SandboxWorkloadsSpec struct {
+	// Enabled indicates if the GPU Operator should manage additional operands required
+	// for sandbox workloads (i.e. VFIO Manager, vGPU Manager, and additional device plugins)
+	Enabled *bool `json:"enabled,omitempty"`
+	// DefaultWorkload indicates the default GPU workload type to configure
+	// worker nodes in the cluster for
+	// +kubebuilder:validation:Enum=container;vm-passthrough;vm-vgpu
+	// +kubebuilder:default=container
+	DefaultWorkload string `json:"defaultWorkload,omitempty"`
 }
 
 // PSPSpec describes configuration for PodSecurityPolicies to apply for all Pods
@@ -162,6 +189,15 @@ type ValidatorSpec struct {
 	// CUDA validator spec
 	CUDA CUDAValidatorSpec `json:"cuda,omitempty"`
 
+	// VfioPCI validator spec
+	VFIOPCI VFIOPCIValidatorSpec `json:"vfioPCI,omitempty"`
+
+	// VGPUManager validator spec
+	VGPUManager VGPUManagerValidatorSpec `json:"vgpuManager,omitempty"`
+
+	// VGPUDevices validator spec
+	VGPUDevices VGPUDevicesValidatorSpec `json:"vgpuDevices,omitempty"`
+
 	// Validator image repository
 	// +kubebuilder:validation:Optional
 	Repository string `json:"repository,omitempty"`
@@ -188,9 +224,6 @@ type ValidatorSpec struct {
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:io.kubernetes:Secret"
 	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
 
-	// Optional: Security Context
-	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
-
 	// Optional: Define resources requests and limits for each pod
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Resource Requirements"
@@ -210,7 +243,7 @@ type ValidatorSpec struct {
 	Env []corev1.EnvVar `json:"env,omitempty"`
 }
 
-// PluginValidatorSpec defines validator spec for plugin component
+// PluginValidatorSpec defines validator spec for NVIDIA Device Plugin
 type PluginValidatorSpec struct {
 	// Optional: List of environment variables
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
@@ -219,7 +252,7 @@ type PluginValidatorSpec struct {
 	Env []corev1.EnvVar `json:"env,omitempty"`
 }
 
-// ToolkitValidatorSpec defines validator spec for toolkit component
+// ToolkitValidatorSpec defines validator spec for NVIDIA Container Toolkit
 type ToolkitValidatorSpec struct {
 	// Optional: List of environment variables
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
@@ -228,7 +261,7 @@ type ToolkitValidatorSpec struct {
 	Env []corev1.EnvVar `json:"env,omitempty"`
 }
 
-// DriverValidatorSpec defines validator spec for driver component
+// DriverValidatorSpec defines validator spec for NVIDIA Driver validation
 type DriverValidatorSpec struct {
 	// Optional: List of environment variables
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
@@ -237,8 +270,35 @@ type DriverValidatorSpec struct {
 	Env []corev1.EnvVar `json:"env,omitempty"`
 }
 
-// CUDAValidatorSpec defines validator spec for cuda validation workload pod
+// CUDAValidatorSpec defines validator spec for CUDA validation workload pod
 type CUDAValidatorSpec struct {
+	// Optional: List of environment variables
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Environment Variables"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:advanced,urn:alm:descriptor:com.tectonic.ui:text"
+	Env []corev1.EnvVar `json:"env,omitempty"`
+}
+
+// VFIOPCIValidatorSpec defines validator spec for NVIDIA VFIO-PCI device validation
+type VFIOPCIValidatorSpec struct {
+	// Optional: List of environment variables
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Environment Variables"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:advanced,urn:alm:descriptor:com.tectonic.ui:text"
+	Env []corev1.EnvVar `json:"env,omitempty"`
+}
+
+// VGPUManagerValidatorSpec defines validator spec for NVIDIA vGPU Manager
+type VGPUManagerValidatorSpec struct {
+	// Optional: List of environment variables
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Environment Variables"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:advanced,urn:alm:descriptor:com.tectonic.ui:text"
+	Env []corev1.EnvVar `json:"env,omitempty"`
+}
+
+// VGPUDevicesValidatorSpec defines validator spec for NVIDIA vGPU device validator
+type VGPUDevicesValidatorSpec struct {
 	// Optional: List of environment variables
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Environment Variables"
@@ -248,21 +308,21 @@ type CUDAValidatorSpec struct {
 
 // MIGSpec defines the configuration for MIG support
 type MIGSpec struct {
-	// Optional: MIGStrategy to apply for GFD and Device-Plugin
+	// Optional: MIGStrategy to apply for GFD and NVIDIA Device Plugin
 	// +kubebuilder:validation:Enum=none;single;mixed
 	Strategy MIGStrategy `json:"strategy,omitempty"`
 }
 
-// DriverManagerSpec describes configuration for driver-manager(initContainer)
+// DriverManagerSpec describes configuration for NVIDIA Driver Manager(initContainer)
 type DriverManagerSpec struct {
-	// Repository represents Driver-Manager repository path
+	// Repository represents Driver Managerrepository path
 	Repository string `json:"repository,omitempty"`
 
-	// Image represents Driver-Manager image name
+	// Image represents NVIDIA Driver Manager image name
 	// +kubebuilder:validation:Pattern=[a-zA-Z0-9\-]+
 	Image string `json:"image,omitempty"`
 
-	// Version represents Driver-Manager image tag(version)
+	// Version represents NVIDIA Driver Manager image tag(version)
 	Version string `json:"version,omitempty"`
 
 	// Image pull policy
@@ -283,31 +343,25 @@ type DriverManagerSpec struct {
 	Env []corev1.EnvVar `json:"env,omitempty"`
 }
 
-// DriverSpec defines the properties for driver deployment
+// DriverSpec defines the properties for NVIDIA Driver deployment
 type DriverSpec struct {
-	// Enabled indicates if deployment of driver through operator is enabled
+	// Enabled indicates if deployment of NVIDIA Driver through operator is enabled
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
-	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Enable driver deployment through GPU Operator"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Enable NVIDIA Driver deployment through GPU Operator"
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:booleanSwitch"
 	Enabled *bool `json:"enabled,omitempty"`
 
-	// UseOpenShiftDriverToolkit indicates if DriverToolkit image should be used on OpenShift to build and install driver modules
-	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
-	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="On OpenShift, enable DriverToolkit image to build and install driver modules"
-	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:booleanSwitch"
-	UseOpenShiftDriverToolkit *bool `json:"use_ocp_driver_toolkit,omitempty"`
-
 	GPUDirectRDMA *GPUDirectRDMASpec `json:"rdma,omitempty"`
 
-	// Driver image repository
+	// NVIDIA Driver image repository
 	// +kubebuilder:validation:Optional
 	Repository string `json:"repository,omitempty"`
 
-	// Driver image name
+	// NVIDIA Driver image name
 	// +kubebuilder:validation:Pattern=[a-zA-Z0-9\-]+
 	Image string `json:"image,omitempty"`
 
-	// Driver image tag
+	// NVIDIA Driver image tag
 	// +kubebuilder:validation:Optional
 	Version string `json:"version,omitempty"`
 
@@ -325,11 +379,8 @@ type DriverSpec struct {
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:io.kubernetes:Secret"
 	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
 
-	// Manager represents configuration for driver manager initContainer
+	// Manager represents configuration for NVIDIA Driver Manager initContainer
 	Manager DriverManagerSpec `json:"manager,omitempty"`
-
-	// Optional: Security Context
-	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
 
 	// Optional: Define resources requests and limits for each pod
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
@@ -349,49 +400,54 @@ type DriverSpec struct {
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:advanced,urn:alm:descriptor:com.tectonic.ui:text"
 	Env []corev1.EnvVar `json:"env,omitempty"`
 
-	// Optional: Custom repo configuration for driver container
+	// Optional: Custom repo configuration for NVIDIA Driver container
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
-	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Custom Repo Configuration For Driver Container"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Custom Repo Configuration For NVIDIA Driver Container"
 	RepoConfig *DriverRepoConfigSpec `json:"repoConfig,omitempty"`
 
-	// Optional: Custom certificates configuration for driver container
+	// Optional: Custom certificates configuration for NVIDIA Driver container
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
-	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Custom Certificates Configuration For Driver Container"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Custom Certificates Configuration For NVIDIA Driver Container"
 	CertConfig *DriverCertConfigSpec `json:"certConfig,omitempty"`
 
-	// Optional: Licensing configuration for vGPU drivers
+	// Optional: Licensing configuration for NVIDIA vGPU licensing
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
-	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Licensing Configuration For vGPU Driver Container"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Licensing Configuration For NVIDIA vGPU Driver Container"
 	LicensingConfig *DriverLicensingConfigSpec `json:"licensingConfig,omitempty"`
 
-	// Optional: Virtual Topology Daemon configuration for vGPU drivers
+	// Optional: Virtual Topology Daemon configuration for NVIDIA vGPU drivers
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Custom Virtual Topology Daemon Configuration For vGPU Driver Container"
 	VirtualTopology *VirtualTopologyConfigSpec `json:"virtualTopology,omitempty"`
 
-	// Optional: Kernel module configuration parameters for the NVIDIA driver
+	// Optional: Kernel module configuration parameters for the NVIDIA Driver
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Kernel module configuration parameters for the NVIDIA driver"
 	KernelModuleConfig *KernelModuleConfigSpec `json:"kernelModuleConfig,omitempty"`
+
+	// Optional: Configuration for rolling update of NVIDIA Driver DaemonSet pods
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Rolling update configuration for NVIDIA Driver DaemonSet pods"
+	RollingUpdate *RollingUpdateSpec `json:"rollingUpdate,omitempty"`
 }
 
-// ToolkitSpec defines the properties for container-toolkit deployment
-type ToolkitSpec struct {
-	// Enabled indicates if deployment of container-toolkit through operator is enabled
+// VGPUManagerSpec defines the properties for the NVIDIA vGPU Manager deployment
+type VGPUManagerSpec struct {
+	// Enabled indicates if deployment of NVIDIA vGPU Manager through operator is enabled
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
-	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Enable container-toolkit deployment through GPU Operator"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Enable vgpu host driver deployment through GPU Operator"
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:booleanSwitch"
 	Enabled *bool `json:"enabled,omitempty"`
 
-	// Toolkit image repository
+	// NVIDIA vGPU Manager image repository
 	// +kubebuilder:validation:Optional
 	Repository string `json:"repository,omitempty"`
 
-	// Toolkit image name
+	// NVIDIA vGPU Manager  image name
 	// +kubebuilder:validation:Pattern=[a-zA-Z0-9\-]+
 	Image string `json:"image,omitempty"`
 
-	// Toolkit image tag
+	// NVIDIA vGPU Manager image tag
 	// +kubebuilder:validation:Optional
 	Version string `json:"version,omitempty"`
 
@@ -408,9 +464,6 @@ type ToolkitSpec struct {
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Image pull secrets"
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:io.kubernetes:Secret"
 	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
-
-	// Optional: Security Context
-	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
 
 	// Optional: Define resources requests and limits for each pod
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
@@ -429,19 +482,89 @@ type ToolkitSpec struct {
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Environment Variables"
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:advanced,urn:alm:descriptor:com.tectonic.ui:text"
 	Env []corev1.EnvVar `json:"env,omitempty"`
+
+	// DriverManager represents configuration for NVIDIA Driver Manager initContainer
+	DriverManager DriverManagerSpec `json:"driverManager,omitempty"`
 }
 
-// DevicePluginSpec defines the properties for device-plugin deployment
+// ToolkitSpec defines the properties for NVIDIA Container Toolkit deployment
+type ToolkitSpec struct {
+	// Enabled indicates if deployment of NVIDIA Container Toolkit through operator is enabled
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Enable NVIDIA Container Toolkit deployment through GPU Operator"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:booleanSwitch"
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// NVIDIA Container Toolkit image repository
+	// +kubebuilder:validation:Optional
+	Repository string `json:"repository,omitempty"`
+
+	// NVIDIA Container Toolkit image name
+	// +kubebuilder:validation:Pattern=[a-zA-Z0-9\-]+
+	Image string `json:"image,omitempty"`
+
+	// NVIDIA Container Toolkit image tag
+	// +kubebuilder:validation:Optional
+	Version string `json:"version,omitempty"`
+
+	// Image pull policy
+	// +kubebuilder:validation:Optional
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Image Pull Policy"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:imagePullPolicy"
+	ImagePullPolicy string `json:"imagePullPolicy,omitempty"`
+
+	// Image pull secrets
+	// +kubebuilder:validation:Optional
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Image pull secrets"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:io.kubernetes:Secret"
+	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
+
+	// Optional: Define resources requests and limits for each pod
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Resource Requirements"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:advanced,urn:alm:descriptor:com.tectonic.ui:resourceRequirements"
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// Optional: List of arguments
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Arguments"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:advanced,urn:alm:descriptor:com.tectonic.ui:text"
+	Args []string `json:"args,omitempty"`
+
+	// Optional: List of environment variables
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Environment Variables"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:advanced,urn:alm:descriptor:com.tectonic.ui:text"
+	Env []corev1.EnvVar `json:"env,omitempty"`
+
+	// Toolkit install directory on the host
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default=/usr/local/nvidia
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Toolkit install directory on the host"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:text"
+	InstallDir string `json:"installDir,omitempty"`
+}
+
+// DevicePluginSpec defines the properties for NVIDIA Device Plugin deployment
 type DevicePluginSpec struct {
-	// DevicePlugin image repository
+	// Enabled indicates if deployment of NVIDIA Device Plugin through operator is enabled
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Enable NVIDIA Device Plugin deployment through GPU Operator"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:booleanSwitch"
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// NVIDIA Device Plugin image repository
 	// +kubebuilder:validation:Optional
 	Repository string `json:"repository,omitempty"`
 
-	// DevicePlugin image name
+	// NVIDIA Device Plugin image name
 	// +kubebuilder:validation:Pattern=[a-zA-Z0-9\-]+
 	Image string `json:"image,omitempty"`
 
-	// DevicePlugin image tag
+	// NVIDIA Device Plugin image tag
 	// +kubebuilder:validation:Optional
 	Version string `json:"version,omitempty"`
 
@@ -459,8 +582,79 @@ type DevicePluginSpec struct {
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:io.kubernetes:Secret"
 	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
 
-	// Optional: Security Context
-	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
+	// Optional: Define resources requests and limits for each pod
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Resource Requirements"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:advanced,urn:alm:descriptor:com.tectonic.ui:resourceRequirements"
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// Optional: List of arguments
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Arguments"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:advanced,urn:alm:descriptor:com.tectonic.ui:text"
+	Args []string `json:"args,omitempty"`
+
+	// Optional: List of environment variables
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Environment Variables"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:advanced,urn:alm:descriptor:com.tectonic.ui:text"
+	Env []corev1.EnvVar `json:"env,omitempty"`
+
+	// Optional: Configuration for the NVIDIA Device Plugin via the ConfigMap
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Configuration for the NVIDIA Device Plugin via the ConfigMap"
+	Config *DevicePluginConfig `json:"config,omitempty"`
+}
+
+// DevicePluginConfig defines ConfigMap name for NVIDIA Device Plugin config
+type DevicePluginConfig struct {
+	// ConfigMap name for NVIDIA Device Plugin config including shared config between plugin and GFD
+	// +kubebuilder:validation:Optional
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="ConfigMap name for NVIDIA Device Plugin including shared config between plugin and GFD"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:text"
+	Name string `json:"name,omitempty"`
+	// Default config name within the ConfigMap for the NVIDIA Device Plugin  config
+	// +kubebuilder:validation:Optional
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Default config name within the ConfigMap for the NVIDIA Device Plugin config"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:text"
+	Default string `json:"default,omitempty"`
+}
+
+// SandboxDevicePluginSpec defines the properties for the NVIDIA Sandbox Device Plugin deployment
+type SandboxDevicePluginSpec struct {
+	// Enabled indicates if deployment of NVIDIA Sandbox Device Plugin through operator is enabled
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Enable NVIDIA Sandbox Device Plugin deployment through GPU Operator"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:booleanSwitch"
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// NVIDIA Sandbox Device Plugin image repository
+	// +kubebuilder:validation:Optional
+	Repository string `json:"repository,omitempty"`
+
+	// NVIDIA Sandbox Device Plugin image name
+	// +kubebuilder:validation:Pattern=[a-zA-Z0-9\-]+
+	Image string `json:"image,omitempty"`
+
+	// NVIDIA Sandbox Device Plugin image tag
+	// +kubebuilder:validation:Optional
+	Version string `json:"version,omitempty"`
+
+	// Image pull policy
+	// +kubebuilder:validation:Optional
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Image Pull Policy"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:imagePullPolicy"
+	ImagePullPolicy string `json:"imagePullPolicy,omitempty"`
+
+	// Image pull secrets
+	// +kubebuilder:validation:Optional
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Image pull secrets"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:io.kubernetes:Secret"
+	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
 
 	// Optional: Define resources requests and limits for each pod
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
@@ -481,17 +675,23 @@ type DevicePluginSpec struct {
 	Env []corev1.EnvVar `json:"env,omitempty"`
 }
 
-// DCGMExporterSpec defines the properties for DCGM exporter deployment
+// DCGMExporterSpec defines the properties for NVIDIA DCGM Exporter deployment
 type DCGMExporterSpec struct {
-	// DCGM image repository
+	// Enabled indicates if deployment of NVIDIA DCGM Exporter through operator is enabled
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Enable NVIDIA DCGM Exporter deployment through GPU Operator"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:booleanSwitch"
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// NVIDIA DCGM Exporter image repository
 	// +kubebuilder:validation:Optional
 	Repository string `json:"repository,omitempty"`
 
-	// DCGM image name
+	// NVIDIA DCGM Exporter image name
 	// +kubebuilder:validation:Pattern=[a-zA-Z0-9\-]+
 	Image string `json:"image,omitempty"`
 
-	// DCGM image tag
+	// NVIDIA DCGM Exporter image tag
 	// +kubebuilder:validation:Optional
 	Version string `json:"version,omitempty"`
 
@@ -508,9 +708,6 @@ type DCGMExporterSpec struct {
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Image pull secrets"
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:io.kubernetes:Secret"
 	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
-
-	// Optional: Security Context
-	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
 
 	// Optional: Define resources requests and limits for each pod
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
@@ -530,15 +727,20 @@ type DCGMExporterSpec struct {
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:advanced,urn:alm:descriptor:com.tectonic.ui:text"
 	Env []corev1.EnvVar `json:"env,omitempty"`
 
-	// Optional: Custom metrics configuration for DCGM exporter
+	// Optional: Custom metrics configuration for NVIDIA DCGM Exporter
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Custom Metrics Configuration For DCGM Exporter"
 	MetricsConfig *DCGMExporterMetricsConfig `json:"config,omitempty"`
+
+	// Optional: ServiceMonitor configuration for NVIDIA DCGM Exporter
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="ServiceMonitor configuration for NVIDIA DCGM Exporter"
+	ServiceMonitor *DCGMExporterServiceMonitorConfig `json:"serviceMonitor,omitempty"`
 }
 
-// DCGMExporterMetricsConfig defines metrics to be collected by DCGM Exporter
+// DCGMExporterMetricsConfig defines metrics to be collected by NVIDIA DCGM Exporter
 type DCGMExporterMetricsConfig struct {
-	// ConfigMap name with file dcgm-metrics.csv for metrics to be collected by DCGM exporter
+	// ConfigMap name with file dcgm-metrics.csv for metrics to be collected by NVIDIA DCGM Exporter
 	// +kubebuilder:validation:Optional
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="ConfigMap name with file dcgm-metrics.csv"
@@ -546,23 +748,52 @@ type DCGMExporterMetricsConfig struct {
 	Name string `json:"name,omitempty"`
 }
 
-// DCGMSpec defines the properties for DCGM deployment
-type DCGMSpec struct {
-	// Enabled indicates if deployment of DCGM hostengine as a separate pod is enabled.
+// DCGMExporterServiceMonitorConfig defines configuration options for the ServiceMonitor
+// deployed for DCGM Exporter
+type DCGMExporterServiceMonitorConfig struct {
+	// Enabled indicates if ServiceMonitor is deployed for NVIDIA DCGM Exporter
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
-	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Enable DCGM hostengine as a separate Pod"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Enable deployment of NVIDIA DCGM Exporter ServiceMonitor"
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:booleanSwitch"
 	Enabled *bool `json:"enabled,omitempty"`
 
-	// DCGM image repository
+	// Interval which metrics should be scraped from NVIDIA DCGM Exporter. If not specified Prometheus’ global scrape interval is used.
+	// Supported units: y, w, d, h, m, s, ms
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Interval which metrics should be scraped from NVDIA DCGM Exporter"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:text"
+	Interval promv1.Duration `json:"interval,omitempty"`
+
+	// HonorLabels chooses the metric’s labels on collisions with target labels.
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Choose the metric's label on collisions with target labels"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:booleanSwitch"
+	HonorLabels *bool `json:"honorLabels,omitempty"`
+
+	// AdditionalLabels to add to ServiceMonitor instance for NVIDIA DCGM Exporter
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Additional labels to add to ServiceMonitor instance for NVIDIA DCGM Exporter"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:text"
+	AdditionalLabels map[string]string `json:"additionalLabels,omitempty"`
+}
+
+// DCGMSpec defines the properties for NVIDIA DCGM deployment
+type DCGMSpec struct {
+	// Enabled indicates if deployment of NVIDIA DCGM Hostengine as a separate pod is enabled.
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Enable NVIDIA DCGM hostengine as a separate Pod"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:booleanSwitch"
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// NVIDIA DCGM image repository
 	// +kubebuilder:validation:Optional
 	Repository string `json:"repository,omitempty"`
 
-	// DCGM image name
+	// NVIDIA DCGM image name
 	// +kubebuilder:validation:Pattern=[a-zA-Z0-9\-]+
 	Image string `json:"image,omitempty"`
 
-	// DCGM image tag
+	// NVIDIA DCGM image tag
 	// +kubebuilder:validation:Optional
 	Version string `json:"version,omitempty"`
 
@@ -579,9 +810,6 @@ type DCGMSpec struct {
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Image pull secrets"
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:io.kubernetes:Secret"
 	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
-
-	// Optional: Security Context
-	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
 
 	// Optional: Define resources requests and limits for each pod
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
@@ -609,21 +837,21 @@ type DCGMSpec struct {
 
 // NodeStatusExporterSpec defines the properties for node-status-exporter state
 type NodeStatusExporterSpec struct {
-	// Enabled indicates if deployment of node-status-exporter is enabled.
+	// Enabled indicates if deployment of Node Status Exporter is enabled.
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
-	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Enable node-status-exporter deployment through GPU Operator"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Enable Node Status Exporter deployment through GPU Operator"
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:booleanSwitch"
 	Enabled *bool `json:"enabled,omitempty"`
 
-	// node-status-exporter image repository
+	// Node Status Exporterimage repository
 	// +kubebuilder:validation:Optional
 	Repository string `json:"repository,omitempty"`
 
-	// node-status-exporter image name
+	// Node Status Exporter image name
 	// +kubebuilder:validation:Pattern=[a-zA-Z0-9\-]+
 	Image string `json:"image,omitempty"`
 
-	// node-status-exporter image tag
+	// Node Status Exporterimage tag
 	// +kubebuilder:validation:Optional
 	Version string `json:"version,omitempty"`
 
@@ -640,9 +868,6 @@ type NodeStatusExporterSpec struct {
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Image pull secrets"
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:io.kubernetes:Secret"
 	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
-
-	// Optional: Security Context
-	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
 
 	// Optional: Define resources requests and limits for each pod
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
@@ -663,7 +888,7 @@ type NodeStatusExporterSpec struct {
 	Env []corev1.EnvVar `json:"env,omitempty"`
 }
 
-// DriverRepoConfigSpec defines custom repo configuration for driver container
+// DriverRepoConfigSpec defines custom repo configuration for NVIDIA Driver container
 type DriverRepoConfigSpec struct {
 	// +kubebuilder:validation:Optional
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
@@ -672,7 +897,7 @@ type DriverRepoConfigSpec struct {
 	ConfigMapName string `json:"configMapName,omitempty"`
 }
 
-// DriverCertConfigSpec defines custom certificates configuration for driver container
+// DriverCertConfigSpec defines custom certificates configuration for NVIDIA Driver container
 type DriverCertConfigSpec struct {
 	// +kubebuilder:validation:Optional
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
@@ -681,7 +906,7 @@ type DriverCertConfigSpec struct {
 	Name string `json:"name,omitempty"`
 }
 
-// DriverLicensingConfigSpec defines licensing server configuration for driver container
+// DriverLicensingConfigSpec defines licensing server configuration for NVIDIA Driver container
 type DriverLicensingConfigSpec struct {
 	// +kubebuilder:validation:Optional
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
@@ -689,14 +914,14 @@ type DriverLicensingConfigSpec struct {
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:text"
 	ConfigMapName string `json:"configMapName,omitempty"`
 
-	// NLSEnabled indicates if NLS is used for licensing.
+	// NLSEnabled indicates if NVIDIA Licensing System is used for licensing.
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
-	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Enable NLS licensing"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Enable NVIDIA Licensing System licensing"
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:booleanSwitch"
 	NLSEnabled *bool `json:"nlsEnabled,omitempty"`
 }
 
-// VirtualTopologyConfigSpec defines virtual topology daemon configuration with vGPU
+// VirtualTopologyConfigSpec defines virtual topology daemon configuration with NVIDIA vGPU
 type VirtualTopologyConfigSpec struct {
 	// Optional: Config name representing virtual topology daemon configuration file nvidia-topologyd.conf
 	// +kubebuilder:validation:Optional
@@ -706,7 +931,7 @@ type VirtualTopologyConfigSpec struct {
 	Config string `json:"config,omitempty"`
 }
 
-// KernelModuleConfigSpec defines custom configuration parameters for the NVIDIA driver
+// KernelModuleConfigSpec defines custom configuration parameters for the NVIDIA Driver
 type KernelModuleConfigSpec struct {
 	// +kubebuilder:validation:Optional
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
@@ -715,8 +940,23 @@ type KernelModuleConfigSpec struct {
 	Name string `json:"name,omitempty"`
 }
 
+// RollingUpdateSpec defines configuration for the rolling update of NVIDIA Driver DaemonSet pods
+type RollingUpdateSpec struct {
+	// +kubebuilder:validation:Optional
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Maximum number of nodes to simultaneously apply pod updates on. Default 1"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:text"
+	MaxUnavailable string `json:"maxUnavailable,omitempty"`
+}
+
 // GPUFeatureDiscoverySpec defines the properties for GPU Feature Discovery Plugin
 type GPUFeatureDiscoverySpec struct {
+	// Enabled indicates if deployment of GPU Feature Discovery Plugin is enabled.
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Enable GPU Feature Discovery Plugin deployment through GPU Operator"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:booleanSwitch"
+	Enabled *bool `json:"enabled,omitempty"`
+
 	// GFD image repository
 	// +kubebuilder:validation:Optional
 	Repository string `json:"repository,omitempty"`
@@ -743,9 +983,6 @@ type GPUFeatureDiscoverySpec struct {
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:io.kubernetes:Secret"
 	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
 
-	// Optional: Security Context
-	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
-
 	// Optional: Define resources requests and limits for each pod
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Resource Requirements"
@@ -765,23 +1002,23 @@ type GPUFeatureDiscoverySpec struct {
 	Env []corev1.EnvVar `json:"env,omitempty"`
 }
 
-// MIGManagerSpec defines the properties for deploying MIG manager
+// MIGManagerSpec defines the properties for deploying NVIDIA MIG Manager
 type MIGManagerSpec struct {
-	// Enabled indicates if deployment of mig-manager is enabled
+	// Enabled indicates if deployment of NVIDIA MIG Manager is enabled
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
-	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Enable mig-manager deployment through GPU Operator"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Enable NVIDIA MIG Manager deployment through GPU Operator"
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:booleanSwitch"
 	Enabled *bool `json:"enabled,omitempty"`
 
-	// mig-manager image repository
+	// NVIDIA MIG Manager image repository
 	// +kubebuilder:validation:Optional
 	Repository string `json:"repository,omitempty"`
 
-	// mig-manager image name
+	// NVIDIA MIG Manager image name
 	// +kubebuilder:validation:Pattern=[a-zA-Z0-9\-]+
 	Image string `json:"image,omitempty"`
 
-	// mig-manager image tag
+	// NVIDIA MIG Manager image tag
 	// +kubebuilder:validation:Optional
 	Version string `json:"version,omitempty"`
 
@@ -799,9 +1036,6 @@ type MIGManagerSpec struct {
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:io.kubernetes:Secret"
 	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
 
-	// Optional: Security Context
-	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
-
 	// Optional: Define resources requests and limits for each pod
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Resource Requirements"
@@ -820,18 +1054,18 @@ type MIGManagerSpec struct {
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:advanced,urn:alm:descriptor:com.tectonic.ui:text"
 	Env []corev1.EnvVar `json:"env,omitempty"`
 
-	// Optional: Custom mig-parted configuration for MIG Manager container
+	// Optional: Custom mig-parted configuration for NVIDIA MIG Manager container
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
-	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Custom mig-parted configuration for MIG Manager container"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Custom mig-parted configuration for NVIDIA MIG Manager container"
 	Config *MIGPartedConfigSpec `json:"config,omitempty"`
 
-	// Optional: Custom gpu-clients configuration for MIG Manager container
+	// Optional: Custom gpu-clients configuration for NVIDIA MIG Manager container
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
-	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Custom gpu-clients configuration for MIG Manager container"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Custom gpu-clients configuration for NVIDIA MIG Manager container"
 	GPUClientsConfig *MIGGPUClientsConfigSpec `json:"gpuClientsConfig,omitempty"`
 }
 
-// GPUDirectRDMASpec defines the properties for nv_peer_mem deployment
+// GPUDirectRDMASpec defines the properties for nvidia-peermem deployment
 type GPUDirectRDMASpec struct {
 	// Enabled indicates if GPUDirect RDMA is enabled through GPU operator
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
@@ -845,7 +1079,7 @@ type GPUDirectRDMASpec struct {
 	UseHostMOFED *bool `json:"useHostMofed,omitempty"`
 }
 
-// GPUDirectStorageSpec defines the properties for nvidia-fs deployment(Experimental)
+// GPUDirectStorageSpec defines the properties for NVIDIA GPUDirect Storage Driver deployment(Experimental)
 type GPUDirectStorageSpec struct {
 	// Enabled indicates if GPUDirect Storage is enabled through GPU operator
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
@@ -853,15 +1087,15 @@ type GPUDirectStorageSpec struct {
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:booleanSwitch"
 	Enabled *bool `json:"enabled,omitempty"`
 
-	// Driver image repository
+	// NVIDIA GPUDirect Storage Driver image repository
 	// +kubebuilder:validation:Optional
 	Repository string `json:"repository,omitempty"`
 
-	// Driver image name
+	// NVIDIA GPUDirect Storage Driver image name
 	// +kubebuilder:validation:Pattern=[a-zA-Z0-9\-]+
 	Image string `json:"image,omitempty"`
 
-	// Driver image tag
+	// NVIDIA GPUDirect Storage Driver image tag
 	// +kubebuilder:validation:Optional
 	Version string `json:"version,omitempty"`
 
@@ -892,7 +1126,7 @@ type GPUDirectStorageSpec struct {
 	Env []corev1.EnvVar `json:"env,omitempty"`
 }
 
-// MIGPartedConfigSpec defines custom mig-parted config for MIG Manager container
+// MIGPartedConfigSpec defines custom mig-parted config for NVIDIA MIG Manager container
 type MIGPartedConfigSpec struct {
 	// ConfigMap name
 	// +kubebuilder:validation:Optional
@@ -902,7 +1136,7 @@ type MIGPartedConfigSpec struct {
 	Name string `json:"name,omitempty"`
 }
 
-// MIGGPUClientsConfigSpec defines custom gpu-clients config for MIG Manager container
+// MIGGPUClientsConfigSpec defines custom gpu-clients config for NVIDIA MIG Manager container
 type MIGGPUClientsConfigSpec struct {
 	// ConfigMap name
 	// +kubebuilder:validation:Optional
@@ -910,6 +1144,137 @@ type MIGGPUClientsConfigSpec struct {
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="ConfigMap Name"
 	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:text"
 	Name string `json:"name,omitempty"`
+}
+
+// VFIOManagerSpec defines the properties for deploying VFIO-PCI manager
+type VFIOManagerSpec struct {
+	// Enabled indicates if deployment of VFIO Manager is enabled
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Enable VFIO Manager deployment through GPU Operator"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:booleanSwitch"
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// VFIO Manager image repository
+	// +kubebuilder:validation:Optional
+	Repository string `json:"repository,omitempty"`
+
+	// VFIO Manager image name
+	// +kubebuilder:validation:Pattern=[a-zA-Z0-9\-]+
+	Image string `json:"image,omitempty"`
+
+	// VFIO Manager image tag
+	// +kubebuilder:validation:Optional
+	Version string `json:"version,omitempty"`
+
+	// Image pull policy
+	// +kubebuilder:validation:Optional
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Image Pull Policy"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:imagePullPolicy"
+	ImagePullPolicy string `json:"imagePullPolicy,omitempty"`
+
+	// Image pull secrets
+	// +kubebuilder:validation:Optional
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Image pull secrets"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:io.kubernetes:Secret"
+	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
+
+	// Optional: Define resources requests and limits for each pod
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Resource Requirements"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:advanced,urn:alm:descriptor:com.tectonic.ui:resourceRequirements"
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// Optional: List of arguments
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Arguments"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:advanced,urn:alm:descriptor:com.tectonic.ui:text"
+	Args []string `json:"args,omitempty"`
+
+	// Optional: List of environment variables
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Environment Variables"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:advanced,urn:alm:descriptor:com.tectonic.ui:text"
+	Env []corev1.EnvVar `json:"env,omitempty"`
+
+	// DriverManager represents configuration for NVIDIA Driver Manager
+	DriverManager DriverManagerSpec `json:"driverManager,omitempty"`
+}
+
+// VGPUDeviceManagerSpec defines the properties for deploying NVIDIA vGPU Device Manager
+type VGPUDeviceManagerSpec struct {
+	// Enabled indicates if deployment of NVIDIA vGPU Device Manager is enabled
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Enable NVIDIA vGPU Device Manager deployment through GPU Operator"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:booleanSwitch"
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// NVIDIA vGPU Device Manager image repository
+	// +kubebuilder:validation:Optional
+	Repository string `json:"repository,omitempty"`
+
+	// NVIDIA vGPU Device Manager image name
+	// +kubebuilder:validation:Pattern=[a-zA-Z0-9\-]+
+	Image string `json:"image,omitempty"`
+
+	// NVIDIA vGPU Device Manager image tag
+	// +kubebuilder:validation:Optional
+	Version string `json:"version,omitempty"`
+
+	// Image pull policy
+	// +kubebuilder:validation:Optional
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Image Pull Policy"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:imagePullPolicy"
+	ImagePullPolicy string `json:"imagePullPolicy,omitempty"`
+
+	// Image pull secrets
+	// +kubebuilder:validation:Optional
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Image pull secrets"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:io.kubernetes:Secret"
+	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
+
+	// Optional: Define resources requests and limits for each pod
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Resource Requirements"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:advanced,urn:alm:descriptor:com.tectonic.ui:resourceRequirements"
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// Optional: List of arguments
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Arguments"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:advanced,urn:alm:descriptor:com.tectonic.ui:text"
+	Args []string `json:"args,omitempty"`
+
+	// Optional: List of environment variables
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Environment Variables"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:advanced,urn:alm:descriptor:com.tectonic.ui:text"
+	Env []corev1.EnvVar `json:"env,omitempty"`
+
+	// NVIDIA vGPU devices configuration for NVIDIA vGPU Device Manager container
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="NVIDIA vGPU devices configuration for NVIDIA vGPU Device Manager container"
+	Config *VGPUDevicesConfigSpec `json:"config,omitempty"`
+}
+
+// VGPUDevicesConfigSpec defines vGPU devices configuration for NVIDIA vGPU Device Manager container
+type VGPUDevicesConfigSpec struct {
+	// ConfigMap name
+	// +kubebuilder:validation:Optional
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="ConfigMap Name"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:text"
+	Name string `json:"name,omitempty"`
+	// Default config name within the ConfigMap
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default=default
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors=true
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.displayName="Default config name within the ConfigMap for the NVIDIA vGPU devices config"
+	// +operator-sdk:gen-csv:customresourcedefinitions.specDescriptors.x-descriptors="urn:alm:descriptor:com.tectonic.ui:text"
+	Default string `json:"default,omitempty"`
 }
 
 // MIGStrategy indicates MIG mode
@@ -935,6 +1300,8 @@ const (
 	Ready State = "ready"
 	// NotReady indicates some/all components of ClusterPolicy are not ready
 	NotReady State = "notReady"
+	// Disabled indicates if the state is disabled
+	Disabled State = "disabled"
 )
 
 // ClusterPolicyStatus defines the observed state of ClusterPolicy
@@ -1014,12 +1381,18 @@ func ImagePath(spec interface{}) (string, error) {
 	case *DriverSpec:
 		config := spec.(*DriverSpec)
 		return imagePath(config.Repository, config.Image, config.Version, "DRIVER_IMAGE")
+	case *VGPUManagerSpec:
+		config := spec.(*VGPUManagerSpec)
+		return imagePath(config.Repository, config.Image, config.Version, "VGPU_MANAGER_IMAGE")
 	case *ToolkitSpec:
 		config := spec.(*ToolkitSpec)
 		return imagePath(config.Repository, config.Image, config.Version, "CONTAINER_TOOLKIT_IMAGE")
 	case *DevicePluginSpec:
 		config := spec.(*DevicePluginSpec)
 		return imagePath(config.Repository, config.Image, config.Version, "DEVICE_PLUGIN_IMAGE")
+	case *SandboxDevicePluginSpec:
+		config := spec.(*SandboxDevicePluginSpec)
+		return imagePath(config.Repository, config.Image, config.Version, "SANDBOX_DEVICE_PLUGIN_IMAGE")
 	case *DCGMExporterSpec:
 		config := spec.(*DCGMExporterSpec)
 		return imagePath(config.Repository, config.Image, config.Version, "DCGM_EXPORTER_IMAGE")
@@ -1047,6 +1420,12 @@ func ImagePath(spec interface{}) (string, error) {
 	case *GPUDirectStorageSpec:
 		config := spec.(*GPUDirectStorageSpec)
 		return imagePath(config.Repository, config.Image, config.Version, "GDS_IMAGE")
+	case *VFIOManagerSpec:
+		config := spec.(*VFIOManagerSpec)
+		return imagePath(config.Repository, config.Image, config.Version, "VFIO_MANAGER_IMAGE")
+	case *VGPUDeviceManagerSpec:
+		config := spec.(*VGPUDeviceManagerSpec)
+		return imagePath(config.Repository, config.Image, config.Version, "VGPU_DEVICE_MANAGER_IMAGE")
 	default:
 		return "", fmt.Errorf("Invalid type to construct image path: %v", v)
 	}
@@ -1068,16 +1447,8 @@ func ImagePullPolicy(pullPolicy string) corev1.PullPolicy {
 	return imagePullPolicy
 }
 
-// Root returns root path for driver install
-func (d *DriverSpec) Root() string {
-	if d.Enabled != nil && !*d.Enabled {
-		return "/"
-	}
-	return DefaultNvidiaDriverRoot
-}
-
-// IsDriverEnabled returns true if driver install is enabled(default) through gpu-operator
-func (d *DriverSpec) IsDriverEnabled() bool {
+// IsEnabled returns true if driver install is enabled(default) through gpu-operator
+func (d *DriverSpec) IsEnabled() bool {
 	if d.Enabled == nil {
 		// default is true if not specified by user
 		return true
@@ -1085,13 +1456,86 @@ func (d *DriverSpec) IsDriverEnabled() bool {
 	return *d.Enabled
 }
 
-// IsToolkitEnabled returns true if container-toolkit install is enabled(default) through gpu-operator
-func (t *ToolkitSpec) IsToolkitEnabled() bool {
+// IsEnabled returns true if device-plugin is enabled(default) through gpu-operator
+func (p *DevicePluginSpec) IsEnabled() bool {
+	if p.Enabled == nil {
+		// default is true if not specified by user
+		return true
+	}
+	return *p.Enabled
+}
+
+// IsEnabled returns true if dcgm-exporter is enabled(default) through gpu-operator
+func (e *DCGMExporterSpec) IsEnabled() bool {
+	if e.Enabled == nil {
+		// default is true if not specified by user
+		return true
+	}
+	return *e.Enabled
+}
+
+// IsEnabled returns true if gpu-feature-discovery is enabled(default) through gpu-operator
+func (g *GPUFeatureDiscoverySpec) IsEnabled() bool {
+	if g.Enabled == nil {
+		// default is true if not specified by user
+		return true
+	}
+	return *g.Enabled
+}
+
+// IsEnabled returns true if VFIO-PCI Manager install is enabled through gpu-operator
+func (v *VFIOManagerSpec) IsEnabled() bool {
+	if v.Enabled == nil {
+		// default is false if not specified by user
+		return false
+	}
+	return *v.Enabled
+}
+
+// IsEnabled returns true if vGPU Manager install is enabled through gpu-operator
+func (d *VGPUManagerSpec) IsEnabled() bool {
+	if d.Enabled == nil {
+		// default is false if not specified by user
+		return false
+	}
+	return *d.Enabled
+}
+
+// IsEnabled returns true if vGPU Device Manager is enabled through gpu-operator
+func (v *VGPUDeviceManagerSpec) IsEnabled() bool {
+	if v.Enabled == nil {
+		// default is false if not specified by user
+		return false
+	}
+	return *v.Enabled
+}
+
+// IsEnabled returns true if container-toolkit install is enabled(default) through gpu-operator
+func (t *ToolkitSpec) IsEnabled() bool {
 	if t.Enabled == nil {
 		// default is true if not specified by user
 		return true
 	}
 	return *t.Enabled
+}
+
+// IsEnabled returns true if the cluster intends to run GPU accelerated
+// workloads in sandboxed environments (VMs).
+func (s *SandboxWorkloadsSpec) IsEnabled() bool {
+	if s.Enabled == nil {
+		// Sandbox workloads are disabled by default
+		return false
+	}
+	return *s.Enabled
+}
+
+// IsEnabled returns true if the sandbox device plugin is enabled through gpu-operator
+func (s *SandboxDevicePluginSpec) IsEnabled() bool {
+	if s.Enabled == nil {
+		// default is false if not specified by user
+		return false
+	}
+	return *s.Enabled
 }
 
 // IsEnabled returns true if PodSecurityPolicies are enabled for all Pods
@@ -1103,8 +1547,8 @@ func (p *PSPSpec) IsEnabled() bool {
 	return *p.Enabled
 }
 
-// IsMIGManagerEnabled returns true if mig-manager is enabled(default) through gpu-operator
-func (m *MIGManagerSpec) IsMIGManagerEnabled() bool {
+// IsEnabled returns true if mig-manager is enabled(default) through gpu-operator
+func (m *MIGManagerSpec) IsEnabled() bool {
 	if m.Enabled == nil {
 		// default is true if not specified by user
 		return true
@@ -1112,9 +1556,9 @@ func (m *MIGManagerSpec) IsMIGManagerEnabled() bool {
 	return *m.Enabled
 }
 
-// IsNodeStatusExporterEnabled returns true if node-status-exporter is
+// IsEnabled returns true if node-status-exporter is
 // enabled through gpu-operator
-func (m *NodeStatusExporterSpec) IsNodeStatusExporterEnabled() bool {
+func (m *NodeStatusExporterSpec) IsEnabled() bool {
 	if m.Enabled == nil {
 		// default is false if not specified by user
 		return false
@@ -1147,6 +1591,15 @@ func (dcgm *DCGMSpec) IsEnabled() bool {
 		return true
 	}
 	return *dcgm.Enabled
+}
+
+// IsEnabled returns true if ServiceMonitor for DCGM Exporter is enabled through gpu-operator
+func (sm *DCGMExporterServiceMonitorConfig) IsEnabled() bool {
+	if sm.Enabled == nil {
+		// ServiceMonitor for DCGM Exporter is disabled by default
+		return false
+	}
+	return *sm.Enabled
 }
 
 // IsNLSEnabled returns true if NLS should be used for licensing the driver

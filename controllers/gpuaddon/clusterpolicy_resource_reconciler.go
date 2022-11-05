@@ -87,7 +87,8 @@ func (r *ClusterPolicyResourceReconciler) setDesiredClusterPolicy(
 	cp.Spec = gpuv1.ClusterPolicySpec{}
 
 	cp.Spec.Operator = gpuv1.OperatorSpec{
-		DefaultRuntime: gpuv1.CRIO,
+		DefaultRuntime:            gpuv1.CRIO,
+		UseOpenShiftDriverToolkit: &enabled,
 	}
 
 	cp.Spec.PSP = gpuv1.PSPSpec{
@@ -100,6 +101,12 @@ func (r *ClusterPolicyResourceReconciler) setDesiredClusterPolicy(
 
 	cp.Spec.DCGM = gpuv1.DCGMSpec{
 		Enabled: &enabled,
+	}
+
+	cp.Spec.DCGMExporter = gpuv1.DCGMExporterSpec{
+		ServiceMonitor: &gpuv1.DCGMExporterServiceMonitorConfig{
+			Enabled: &enabled,
+		},
 	}
 
 	cp.Spec.MIGManager = gpuv1.MIGManagerSpec{
@@ -129,8 +136,6 @@ func (r *ClusterPolicyResourceReconciler) setDesiredClusterPolicy(
 		cp.Spec.Driver.Image = "driver"
 		cp.Spec.Driver.Version = gpuAddon.Spec.DriverVersion
 	}
-
-	cp.Spec.Driver.UseOpenShiftDriverToolkit = &enabled
 
 	cp.Spec.Driver.GPUDirectRDMA = &gpuv1.GPUDirectRDMASpec{
 		Enabled: &disabled,
