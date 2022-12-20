@@ -19,7 +19,7 @@ RUN make build
 
 # Use UBI8 Micro as minimal base image to package the manager binary
 # Refer to https://www.redhat.com/en/blog/introduction-ubi-micro for more details
-FROM registry.access.redhat.com/ubi8/ubi-micro:8.5
+FROM registry.access.redhat.com/ubi8/ubi-micro:8.7
 COPY --from=builder /opt/app-root/src/bin/manager /usr/local/bin/manager
 USER 1001
 
